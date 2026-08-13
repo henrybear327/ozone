@@ -163,6 +163,45 @@ class TestOzoneLocal {
     assertFalse(out.toString(UTF_8.name()).contains("Recon endpoint:"));
   }
 
+  /**
+   * With --s3-auth the summary must not repeat the "any credentials" line, which would now be
+   * false, and must say that the cluster is still not secure: the flag checks the S3 credential
+   * and nothing else about the caller.
+   */
+  @Test
+  void runCommandSummarySaysCredentialsAreCheckedWhenS3AuthIsOn() throws Exception {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    StubRuntime runtime = new StubRuntime("localhost", 9860, 9862, "http://localhost:9878");
+    TestableRunCommand command = new TestableRunCommand(runtime);
+    CommandLine commandLine = new CommandLine(command);
+    commandLine.setOut(new PrintWriter(new OutputStreamWriter(out, UTF_8), true));
+
+    int exitCode = commandLine.execute("--s3-auth");
+
+    assertEquals(0, exitCode);
+    String text = out.toString(UTF_8.name());
+    assertTrue(text.contains("only credentials the S3 Gateway accepts"), text);
+    assertTrue(text.contains("still not secure"), text);
+    assertFalse(text.contains("accepts any credentials"), text);
+  }
+
+  /**
+   * --s3-auth is honored by the S3 Gateway setup path, which --no-s3g skips entirely, so the
+   * combination would leave the check unconfigured and the secret unprovisioned while the command
+   * reported success. Rejecting it is the difference between a named error and silence.
+   */
+  @Test
+  void resolveConfigRejectsS3AuthWithoutS3Gateway() {
+    OzoneLocal.RunCommand command = new OzoneLocal.RunCommand();
+    new CommandLine(command).parseArgs("--s3-auth", "--no-s3g");
+
+    IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        command::resolveConfig);
+
+    assertTrue(error.getMessage().contains("--s3-auth"), error.getMessage());
+    assertTrue(error.getMessage().contains("--no-s3g"), error.getMessage());
+  }
+
   @Test
   void runCommandOmitsS3SummaryWhenS3gDisabled() throws Exception {
     ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -334,6 +373,8 @@ class TestOzoneLocal {
         LocalOzoneClusterConfig.DEFAULT_RECON_ENABLED_VALUE);
     assertEnvDefault("reconPort", OzoneLocal.ENV_RECON_PORT,
         LocalOzoneClusterConfig.DEFAULT_PORT_VALUE);
+    assertEnvDefault("s3AuthEnabled", OzoneLocal.ENV_S3_AUTH,
+        LocalOzoneClusterConfig.DEFAULT_S3_AUTH_VALUE);
     assertEnvDefault("ephemeral", OzoneLocal.ENV_EPHEMERAL,
         LocalOzoneClusterConfig.DEFAULT_EPHEMERAL_VALUE);
     assertEnvDefault("startupTimeout", OzoneLocal.ENV_STARTUP_TIMEOUT,
@@ -667,6 +708,8 @@ class TestOzoneLocal {
         return LocalOzoneClusterConfig.DEFAULT_S3G_ENABLED_VALUE;
       } else if ("--recon".equals(option)) {
         return LocalOzoneClusterConfig.DEFAULT_RECON_ENABLED_VALUE;
+      } else if ("--s3-auth".equals(option)) {
+        return LocalOzoneClusterConfig.DEFAULT_S3_AUTH_VALUE;
       } else if ("--ephemeral".equals(option)) {
         return LocalOzoneClusterConfig.DEFAULT_EPHEMERAL_VALUE;
       } else if ("--startup-timeout".equals(option)) {

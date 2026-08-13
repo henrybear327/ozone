@@ -42,6 +42,8 @@ import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_KEY_PREALLOCATION_BL
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_READONLY_ADMINISTRATORS;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_READ_BLACKLIST_GROUPS;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_READ_BLACKLIST_USERS;
+import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_S3_SIGNATURE_VALIDATION_ENABLED;
+import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_S3_SIGNATURE_VALIDATION_ENABLED_DEFAULT;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_SCM_BLOCK_SIZE;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_SCM_BLOCK_SIZE_DEFAULT;
 import static org.apache.hadoop.ozone.OzoneConsts.DB_TRANSIENT_MARKER;
@@ -523,6 +525,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
   private static final int MSECS_PER_MINUTE = 60 * 1000;
 
   private final boolean isSecurityEnabled;
+  private final boolean s3SignatureValidationEnabled;
 
   private IAccessAuthorizer accessAuthorizer;
   // This metadata reader points to the active filesystem
@@ -549,6 +552,9 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
         OMHANodeDetails.loadOMHAConfig(configuration);
 
     this.isSecurityEnabled = OzoneSecurityUtil.isSecurityEnabled(conf);
+    this.s3SignatureValidationEnabled = conf.getBoolean(
+        OZONE_S3_SIGNATURE_VALIDATION_ENABLED,
+        OZONE_S3_SIGNATURE_VALIDATION_ENABLED_DEFAULT);
     this.peerNodesMap = omhaNodeDetails.getPeerNodesMap();
     this.omNodeDetails = omhaNodeDetails.getLocalNodeDetails();
     omStorage = new OMStorage(conf);
@@ -1003,7 +1009,12 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
         ),
         metadataManager.getLock()
     );
-    if (secConfig.isSecurityEnabled() || testSecureOmFlag) {
+    // Also built for s3SignatureValidationEnabled, which needs only the S3AUTHINFO branch of
+    // OzoneDelegationTokenSecretManager#retrievePassword: that reads s3SecretManager and
+    // AWSV4AuthValidator, neither of which needs the certificate client, the secret key client,
+    // or start(). Whether the RPC servers are handed the manager is a separate question, see
+    // delegationTokenAuthEnabled().
+    if (secConfig.isSecurityEnabled() || testSecureOmFlag || s3SignatureValidationEnabled) {
       try {
         delegationTokenMgr = createDelegationTokenSecretManager(configuration);
       } catch (IllegalArgumentException e) {
@@ -1014,6 +1025,15 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
           } catch (Exception ex) {
             LOG.warn("Failed to stop metadataManager", e);
           }
+        }
+        if (!delegationTokenAuthEnabled()) {
+          // The manager exists only for the S3 signature check, so its delegation token duration
+          // constraints are being enforced on a cluster that issues no delegation tokens. Name
+          // the setting that pulled them in, or the operator has no path from the message back
+          // to it.
+          throw new IllegalArgumentException(OZONE_S3_SIGNATURE_VALIDATION_ENABLED
+              + " needs the delegation token secret manager, which rejected this configuration: "
+              + e.getMessage(), e);
         }
         throw e;
       }
@@ -1150,6 +1170,28 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
 
   public boolean isTestSecureOmFlag() {
     return testSecureOmFlag;
+  }
+
+  /**
+   * Return config value of
+   * {@link OzoneConfigKeys#OZONE_S3_SIGNATURE_VALIDATION_ENABLED}. Kept separate from
+   * {@link #isSecurityEnabled()} because it authenticates the S3 credential alone: widening
+   * isSecurityEnabled() would also reach OMMultiTenantManager, which reads it to decide whether
+   * multi-tenancy may be enabled.
+   */
+  public boolean isS3SignatureValidationEnabled() {
+    return s3SignatureValidationEnabled;
+  }
+
+  /**
+   * Whether the RPC servers should offer token authentication, which is what handing them
+   * delegationTokenMgr does. False when the manager exists only for
+   * {@link #isS3SignatureValidationEnabled()}: that check runs inside the OM, and advertising
+   * TOKEN in the server's SASL methods on a cluster with no token machinery is a different and
+   * unwanted change.
+   */
+  private boolean delegationTokenAuthEnabled() {
+    return secConfig.isSecurityEnabled() || testSecureOmFlag;
   }
 
   private KeyProviderCryptoExtension createKeyProviderExt(
@@ -1511,7 +1553,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
         .setNumHandlers(handlerCount)
         .setNumReaders(readThreads)
         .setVerbose(false)
-        .setSecretManager(delegationTokenMgr)
+        .setSecretManager(delegationTokenAuthEnabled() ? delegationTokenMgr : null)
         .build();
 
     HddsServerUtil.addPBProtocol(conf, OMInterServiceProtocolPB.class,
@@ -1542,7 +1584,7 @@ public final class OzoneManager extends ServiceRuntimeInfoImpl
   private GrpcOzoneManagerServer startGrpcServer(OzoneConfiguration conf) {
     return new GrpcOzoneManagerServer(conf,
         this.omServerProtocol,
-        this.delegationTokenMgr,
+        delegationTokenAuthEnabled() ? this.delegationTokenMgr : null,
         this.certClient,
         this.threadPrefix);
   }

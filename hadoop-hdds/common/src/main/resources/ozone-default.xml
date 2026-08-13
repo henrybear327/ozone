@@ -1892,6 +1892,25 @@
     </description>
   </property>
   <property>
+    <name>ozone.s3.signature.validation.enabled</name>
+    <value>false</value>
+    <tag>OZONE, SECURITY, S3GATEWAY</tag>
+    <description>
+      Makes the OM verify the SigV4 signature on an S3 request against the secret stored for its
+      access key, on a cluster where ozone.security.enabled is false. A request signed with a
+      secret that does not match, or with an access key that has no stored secret, is rejected.
+
+      This authenticates the S3 credential and nothing else. It does not enable Kerberos,
+      certificates, block tokens, or ACLs, and outside this one check the access key id remains an
+      unauthenticated claim of identity. It is not a substitute for ozone.security.enabled, and a
+      cluster reachable beyond loopback still needs that. Intended for development clusters, such
+      as `ozone local`, that want a wrong secret rejected.
+
+      Provision a secret for the access key with `ozone s3 getsecret` or through the S3 secret
+      table before enabling this, or every request is rejected.
+    </description>
+  </property>
+  <property>
     <name>ozone.s3g.default.bucket.layout</name>
     <value>OBJECT_STORE</value>
     <tag>OZONE, S3GATEWAY</tag>

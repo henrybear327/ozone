@@ -209,6 +209,17 @@ public final class OzoneConfigKeys {
   public static final String OZONE_S3_ADMINISTRATORS_GROUPS =
       "ozone.s3.administrators.groups";
 
+  /**
+   * Makes the OM verify the SigV4 signature on an S3 request against the secret stored for its
+   * access key, on a cluster where {@link #OZONE_SECURITY_ENABLED_KEY} is off. It authenticates
+   * the credential and nothing else: Kerberos, certificates, block tokens, and ACLs all stay off,
+   * and the access key id remains an unauthenticated claim of identity everywhere outside this
+   * check. Intended for development clusters that want a wrong secret rejected.
+   */
+  public static final String OZONE_S3_SIGNATURE_VALIDATION_ENABLED =
+      "ozone.s3.signature.validation.enabled";
+  public static final boolean OZONE_S3_SIGNATURE_VALIDATION_ENABLED_DEFAULT = false;
+
   public static final String OZONE_READONLY_ADMINISTRATORS =
       "ozone.readonly.administrators";
   public static final String OZONE_READONLY_ADMINISTRATORS_GROUPS =

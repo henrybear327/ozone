@@ -63,6 +63,7 @@ public class OzoneLocal extends GenericCli {
   static final String ENV_RECON_ENABLED = "OZONE_LOCAL_RECON_ENABLED";
   static final String ENV_RECON_PORT = "OZONE_LOCAL_RECON_PORT";
   static final String ENV_EPHEMERAL = "OZONE_LOCAL_EPHEMERAL";
+  static final String ENV_S3_AUTH = "OZONE_LOCAL_S3_AUTH";
   static final String ENV_STARTUP_TIMEOUT = "OZONE_LOCAL_STARTUP_TIMEOUT";
 
   private static final String DEFAULT_DATA_DIR_VALUE = "${env:" + ENV_DATA_DIR
@@ -95,6 +96,9 @@ public class OzoneLocal extends GenericCli {
   private static final String DEFAULT_EPHEMERAL_VALUE = "${env:"
       + ENV_EPHEMERAL + ":-"
       + LocalOzoneClusterConfig.DEFAULT_EPHEMERAL_VALUE + "}";
+  private static final String DEFAULT_S3_AUTH_VALUE = "${env:"
+      + ENV_S3_AUTH + ":-"
+      + LocalOzoneClusterConfig.DEFAULT_S3_AUTH_VALUE + "}";
   private static final String DEFAULT_STARTUP_TIMEOUT_VALUE = "${env:"
       + ENV_STARTUP_TIMEOUT + ":-"
       + LocalOzoneClusterConfig.DEFAULT_STARTUP_TIMEOUT_VALUE + "}";
@@ -224,6 +228,15 @@ public class OzoneLocal extends GenericCli {
         description = "Enable Recon")
     private boolean reconEnabled;
 
+    @Option(names = "--s3-auth",
+        negatable = true,
+        defaultValue = DEFAULT_S3_AUTH_VALUE,
+        fallbackValue = "true",
+        description = "Check S3 credentials against the provisioned secret."
+            + " Development only: it does not enable security, and every other identity check"
+            + " stays off")
+    private boolean s3AuthEnabled;
+
     @Option(names = "--ephemeral",
         negatable = true,
         defaultValue = DEFAULT_EPHEMERAL_VALUE,
@@ -274,8 +287,13 @@ public class OzoneLocal extends GenericCli {
         writer.println("AWS_REGION=" + LocalOzoneClusterConfig.LOCAL_S3_REGION);
         writer.println("AWS_ENDPOINT_URL_S3=" + runtime.getS3Endpoint());
         writer.println("Use path-style addressing (AWS CLI: aws configure set default.s3.addressing_style path).");
-        writer.println("Local Ozone runs without security, so the S3 Gateway accepts any credentials;");
-        writer.println("the access key id is the identity buckets are created under.");
+        if (config.isS3AuthEnabled()) {
+          writer.println("--s3-auth is on, so these are the only credentials the S3 Gateway accepts.");
+          writer.println("The cluster is still not secure: nothing else about the caller is checked.");
+        } else {
+          writer.println("Local Ozone runs without security, so the S3 Gateway accepts any credentials;");
+          writer.println("the access key id is the identity buckets are created under.");
+        }
       }
       if (config.isReconEnabled()) {
         writer.println("Recon endpoint: " + runtime.getReconEndpoint());
@@ -316,6 +334,14 @@ public class OzoneLocal extends GenericCli {
         throw new IllegalArgumentException(
             "Datanode count for --datanodes must be at least 1.");
       }
+      if (s3AuthEnabled && !s3gEnabled) {
+        // The check is configured and the secret provisioned alongside the gateway, so with
+        // --no-s3g the flag would be silently dropped. Set
+        // ozone.s3.signature.validation.enabled directly if an external S3 Gateway is pointed at
+        // this OM; the runtime leaves that key alone when it starts no gateway of its own.
+        throw new IllegalArgumentException(
+            "--s3-auth needs the S3 Gateway, which --no-s3g turns off.");
+      }
       validatePort(scmPort, "--scm-port");
       validatePort(omPort, "--om-port");
       validatePort(s3gPort, "--s3g-port");
@@ -334,6 +360,7 @@ public class OzoneLocal extends GenericCli {
           .setReconPort(reconPort)
           .setReconEnabled(reconEnabled)
           .setEphemeral(ephemeral)
+          .setS3AuthEnabled(s3AuthEnabled)
           .setStartupTimeout(startupTimeout)
           .build();
     }

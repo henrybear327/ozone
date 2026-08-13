@@ -49,6 +49,7 @@ class TestLocalOzoneClusterConfig {
     assertEquals(0, config.getReconPort());
     assertFalse(config.isReconEnabled());
     assertFalse(config.isEphemeral());
+    assertFalse(config.isS3AuthEnabled());
     assertEquals(Duration.ofMinutes(2), config.getStartupTimeout());
   }
 
@@ -91,6 +92,7 @@ class TestLocalOzoneClusterConfig {
         .setReconPort(9888)
         .setReconEnabled(true)
         .setEphemeral(true)
+        .setS3AuthEnabled(true)
         .setStartupTimeout(Duration.ofSeconds(45))
         .build();
 
@@ -108,6 +110,7 @@ class TestLocalOzoneClusterConfig {
     assertEquals(9888, config.getReconPort());
     assertTrue(config.isReconEnabled());
     assertTrue(config.isEphemeral());
+    assertTrue(config.isS3AuthEnabled());
     assertEquals(Duration.ofSeconds(45), config.getStartupTimeout());
   }
 

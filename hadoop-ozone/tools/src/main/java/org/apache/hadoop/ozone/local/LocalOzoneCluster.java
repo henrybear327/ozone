@@ -64,6 +64,7 @@ import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_HTTP_BASEDIR;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_METADATA_DIRS;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_REPLICATION;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_REPLICATION_TYPE;
+import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_S3_SIGNATURE_VALIDATION_ENABLED;
 import static org.apache.hadoop.ozone.OzoneConsts.OZONE_RATIS_SNAPSHOT_DIR;
 import static org.apache.hadoop.ozone.common.Storage.StorageState.INITIALIZED;
 import static org.apache.hadoop.ozone.om.OMConfigKeys.OZONE_OM_ADDRESS_KEY;
@@ -140,6 +141,7 @@ import org.apache.hadoop.ozone.common.Storage;
 import org.apache.hadoop.ozone.container.replication.ReplicationServer;
 import org.apache.hadoop.ozone.om.OMStorage;
 import org.apache.hadoop.ozone.om.OzoneManager;
+import org.apache.hadoop.ozone.om.helpers.S3SecretValue;
 import org.apache.hadoop.ozone.recon.ConfigurationProvider;
 import org.apache.hadoop.ozone.recon.ReconServer;
 import org.apache.hadoop.ozone.recon.ReconSqlDbConfig;
@@ -283,6 +285,9 @@ public final class LocalOzoneCluster implements LocalOzoneRuntime {
             config.getStartupTimeout());
       }
       if (config.isS3gEnabled()) {
+        if (config.isS3AuthEnabled()) {
+          provisionS3Credentials();
+        }
         startS3Gateway(prepared.getConfiguration());
       }
     } catch (Exception ex) {
@@ -748,6 +753,9 @@ public final class LocalOzoneCluster implements LocalOzoneRuntime {
     // The runtime advertises an http:// endpoint and reads the bound port back off this
     // listener, so a configuration that switches it off leaves nothing to report.
     setLocalOverride(conf, OZONE_S3G_HTTP_ENABLED_KEY, true);
+    // Set from --s3-auth rather than left to the user: the runtime provisions exactly one secret,
+    // so turning the check on without that provisioning would reject every request.
+    setLocalOverride(conf, OZONE_S3_SIGNATURE_VALIDATION_ENABLED, config.isS3AuthEnabled());
 
     int s3gHttpPort = reservePort(portAllocator, persistedPorts,
         S3G_HTTP_PORT_KEY, config.getS3gPort());
@@ -967,6 +975,20 @@ public final class LocalOzoneCluster implements LocalOzoneRuntime {
       datanodes.add(datanode);
       datanode.start(dnConf);
     }
+  }
+
+  /**
+   * Stores the credentials the startup summary prints, so the signature check
+   * {@link org.apache.hadoop.ozone.OzoneConfigKeys#OZONE_S3_SIGNATURE_VALIDATION_ENABLED} turns on
+   * has a secret to verify against and the user needs no {@code ozone s3 getsecret} step. Written
+   * to the secret store directly rather than through the OM request pipeline: the local runtime is
+   * single-node and non-HA, the same fixed credentials are re-provisioned on every start, and a
+   * development credential needs neither Ratis replication nor an audit trail.
+   */
+  private void provisionS3Credentials() throws IOException {
+    om.getS3SecretManager().storeSecret(LocalOzoneClusterConfig.LOCAL_S3_ACCESS_KEY,
+        S3SecretValue.of(LocalOzoneClusterConfig.LOCAL_S3_ACCESS_KEY,
+            LocalOzoneClusterConfig.LOCAL_S3_SECRET_KEY));
   }
 
   private void startS3Gateway(OzoneConfiguration conf) throws Exception {

@@ -45,6 +45,7 @@ public final class LocalOzoneClusterConfig {
   static final String DEFAULT_S3G_ENABLED_VALUE = "true";
   static final String DEFAULT_RECON_ENABLED_VALUE = "false";
   static final String DEFAULT_EPHEMERAL_VALUE = "false";
+  static final String DEFAULT_S3_AUTH_VALUE = "false";
   static final String DEFAULT_STARTUP_TIMEOUT_VALUE = "PT2M";
 
   static final Path DEFAULT_DATA_DIR =
@@ -57,9 +58,11 @@ public final class LocalOzoneClusterConfig {
   static final int DEFAULT_DATANODES =
       Integer.parseInt(DEFAULT_DATANODES_VALUE);
   static final String DEFAULT_HOST = "127.0.0.1";
-  // Loopback, not the wildcard address: the local runtime leaves security off, and
-  // S3SecurityUtil#validateS3Credential only checks a signature when it is on, so listening on
-  // every interface would serve a writable S3 endpoint to anyone who can reach the port.
+  // Loopback, not the wildcard address: the local runtime leaves security off, so
+  // S3SecurityUtil#validateS3Credential accepts any credentials and listening on every interface
+  // would serve a writable S3 endpoint to anyone who can reach the port. --s3-auth narrows that
+  // to one credential but leaves the cluster non-secure, so it does not change this default.
+  // Widening the bind is an explicit --bind-host choice.
   static final String DEFAULT_BIND_HOST = "127.0.0.1";
   static final String WILDCARD_HOST = "0.0.0.0";
   static final int DEFAULT_PORT = Integer.parseInt(DEFAULT_PORT_VALUE);
@@ -69,12 +72,15 @@ public final class LocalOzoneClusterConfig {
       Boolean.parseBoolean(DEFAULT_RECON_ENABLED_VALUE);
   static final boolean DEFAULT_EPHEMERAL =
       Boolean.parseBoolean(DEFAULT_EPHEMERAL_VALUE);
+  static final boolean DEFAULT_S3_AUTH =
+      Boolean.parseBoolean(DEFAULT_S3_AUTH_VALUE);
   static final Duration DEFAULT_STARTUP_TIMEOUT =
       Duration.parse(DEFAULT_STARTUP_TIMEOUT_VALUE);
-  // Printed for client setup, not enforced: with security off any credentials are accepted. The
-  // access key id still names the caller, so OMClientRequest records it as the request user and
-  // RpcClient stores it as the owner of buckets created through the gateway. Keeping one fixed
-  // value keeps that ownership stable across restarts.
+  // Printed for client setup. Enforced only under --s3-auth, which provisions this pair as the
+  // S3 secret and has the OM check signatures against it; otherwise any credentials are accepted.
+  // Either way the access key id names the caller, so OMClientRequest records it as the request
+  // user and RpcClient stores it as the owner of buckets created through the gateway. Keeping one
+  // fixed value keeps that ownership stable across restarts.
   static final String LOCAL_S3_ACCESS_KEY = "admin";
   static final String LOCAL_S3_SECRET_KEY = "admin123";
   static final String LOCAL_S3_REGION = "us-east-1";
@@ -91,6 +97,7 @@ public final class LocalOzoneClusterConfig {
   private final int reconPort;
   private final boolean reconEnabled;
   private final boolean ephemeral;
+  private final boolean s3AuthEnabled;
   private final Duration startupTimeout;
 
   private LocalOzoneClusterConfig(Builder builder) {
@@ -108,6 +115,7 @@ public final class LocalOzoneClusterConfig {
     reconPort = builder.reconPort;
     reconEnabled = builder.reconEnabled;
     ephemeral = builder.ephemeral;
+    s3AuthEnabled = builder.s3AuthEnabled;
     startupTimeout = Objects.requireNonNull(builder.startupTimeout,
         "startupTimeout");
   }
@@ -184,6 +192,14 @@ public final class LocalOzoneClusterConfig {
   }
 
   /**
+   * Returns whether the OM should check the signature on an S3 request against the secret the
+   * runtime provisions for {@link #LOCAL_S3_ACCESS_KEY}, rather than accepting any credentials.
+   */
+  public boolean isS3AuthEnabled() {
+    return s3AuthEnabled;
+  }
+
+  /**
    * Returns how long the launcher should wait for local services to become
    * ready before failing startup.
    */
@@ -248,6 +264,7 @@ public final class LocalOzoneClusterConfig {
     private int reconPort = DEFAULT_PORT;
     private boolean reconEnabled = DEFAULT_RECON_ENABLED;
     private boolean ephemeral = DEFAULT_EPHEMERAL;
+    private boolean s3AuthEnabled = DEFAULT_S3_AUTH;
     private Duration startupTimeout = DEFAULT_STARTUP_TIMEOUT;
 
     private Builder(Path dataDir) {
@@ -306,6 +323,11 @@ public final class LocalOzoneClusterConfig {
 
     public Builder setEphemeral(boolean value) {
       ephemeral = value;
+      return this;
+    }
+
+    public Builder setS3AuthEnabled(boolean value) {
+      s3AuthEnabled = value;
       return this;
     }
 

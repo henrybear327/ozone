@@ -47,13 +47,18 @@ public final class S3SecurityUtil {
   /**
    * Validate S3 Credentials which are part of {@link OMRequest}.
    *
-   * If validation is successful returns, else throw exception.
+   * If validation is successful returns, else throw exception. Runs when the cluster is secure,
+   * and also when
+   * {@link org.apache.hadoop.ozone.OzoneConfigKeys#OZONE_S3_SIGNATURE_VALIDATION_ENABLED} asks a
+   * non-secure cluster to check the signature and nothing else.
+   *
    * @throws OMException         validation failure
    *         ServiceException    Server is not leader or not ready
    */
   public static void validateS3Credential(OMRequest omRequest,
       OzoneManager ozoneManager) throws ServiceException, OMException {
-    if (ozoneManager.isSecurityEnabled()) {
+    if (ozoneManager.isSecurityEnabled()
+        || ozoneManager.isS3SignatureValidationEnabled()) {
       OzoneTokenIdentifier s3Token = constructS3Token(omRequest);
       try {
         // authenticate user with signature verification through
